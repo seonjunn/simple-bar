@@ -59,7 +59,7 @@ export const Widget = React.memo(() => {
   const getSpotify = React.useCallback(async () => {
     if (!visible) return;
     const isRunning = await Utils.cachedRun(
-      `ps aux | grep -v 'grep' | grep -q '[S]potify Helper' && echo "true" || echo "false"`,
+      `pgrep -fq '[S]potify Helper' && echo "true" || echo "false"`,
       refresh,
     );
     if (Utils.cleanupOutput(isRunning) === "false") {
