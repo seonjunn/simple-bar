@@ -37,7 +37,7 @@ const Component = React.memo(() => {
 
   // Map through displays and render spaces for the current display
   return displays.map((display) => {
-    const displayId = AeroSpace.getCustomDisplayIndex(display);
+    const displayId = AeroSpace.getCustomDisplayIndex(display, displays);
     if (displayId !== displayIndex) return null;
 
     // Filter spaces based on display settings

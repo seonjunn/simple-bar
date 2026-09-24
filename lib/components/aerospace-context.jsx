@@ -2,6 +2,7 @@ import * as Uebersicht from "uebersicht";
 import { useSimpleBarContext } from "./simple-bar-context.jsx";
 import useServerSocket from "../hooks/use-server-socket.js";
 import * as Aerospace from "../aerospace.js";
+import * as AerospaceMode from "../aerospace-mode.js";
 
 const { React } = Uebersicht;
 
@@ -31,29 +32,55 @@ export default React.memo(AerospaceContextProvider);
  */
 function AerospaceContextProvider({ children }) {
   // Get settings, displayIndex, and displays from SimpleBarContext
-  const { settings, displayIndex, displays } = useSimpleBarContext();
+  const { settings, displayIndex, displays, setDisplays } = useSimpleBarContext();
   const { enableServer, aerospaceServerRefresh } = settings.global;
   const serverEnabled = enableServer && aerospaceServerRefresh;
 
   // State to store aerospace spaces
   const [aerospaceSpaces, setAerospaceSpaces] = React.useState([]);
+  const [currentMode, setCurrentMode] = React.useState({ mode: "main" });
+  const latestRequestRef = React.useRef(0);
 
   // Fetches and sets the aerospace spaces
   const getSpaces = React.useCallback(async () => {
+    const requestId = latestRequestRef.current + 1;
+    latestRequestRef.current = requestId;
+
     let focusedWindow = {};
     const [focusedSpace] = await Aerospace.getFocusedSpace();
     try {
       [focusedWindow] = await Aerospace.getFocusedWindow();
       // eslint-disable-next-line no-empty
     } catch (e) {}
+    // Fetch fresh displays to handle monitor connect/disconnect without full widget reload
+    const freshDisplays = await Aerospace.getDisplays();
+    const displayList = freshDisplays?.length ? freshDisplays : displays;
+    if (
+      requestId === latestRequestRef.current &&
+      freshDisplays?.length &&
+      JSON.stringify(freshDisplays) !== JSON.stringify(displays)
+    ) {
+      setDisplays(freshDisplays);
+    }
+    // Build a lookup from nsscreen ID → resolved display index
+    const nscreenToIndex = {};
+    for (const display of displayList) {
+      const nsId = display["monitor-appkit-nsscreen-screens-id"];
+      if (nsId != null) {
+        nscreenToIndex[nsId] = Aerospace.getCustomDisplayIndex(display, displayList);
+      }
+    }
+
     const spaces = await Promise.all(
-      displays.map(async (display) => {
+      displayList.map(async (display) => {
         const id = display["monitor-id"];
         const result = await Aerospace.getSpaces(id);
         return Promise.all(
           result.map(async (space) => {
             const focused = space.workspace === focusedSpace.workspace;
-            const monitor = Aerospace.getCustomDisplayIndex(space);
+            const monitor =
+              nscreenToIndex[space["monitor-appkit-nsscreen-screens-id"]] ??
+              Aerospace.getCustomDisplayIndex(space);
             const windows = await Aerospace.getWindows(space.workspace);
             const formatted = windows.map((window) => {
               const focused =
@@ -68,8 +95,11 @@ function AerospaceContextProvider({ children }) {
         );
       }),
     );
+    if (requestId !== latestRequestRef.current) {
+      return;
+    }
     setAerospaceSpaces(spaces.flat());
-  }, [displays]);
+  }, [displays, setDisplays]);
 
   // Refreshes spaces with the data sent by simple-bar-server if it exists
   // in order to speed up the process then refreshes everything in background
@@ -94,6 +124,16 @@ function AerospaceContextProvider({ children }) {
     setAerospaceSpaces([]);
   };
 
+  const getMode = React.useCallback(async () => {
+    const nextMode = await AerospaceMode.getMode();
+    setCurrentMode((prev) => {
+      if (prev.mode === nextMode.mode && prev.color === nextMode.color) {
+        return prev;
+      }
+      return nextMode;
+    });
+  }, []);
+
   // Use server socket to fetch and reset spaces
   useServerSocket("spaces", serverEnabled, refreshSpaces, resetSpaces);
 
@@ -102,8 +142,14 @@ function AerospaceContextProvider({ children }) {
     refreshSpaces();
   }, [refreshSpaces, displayIndex]);
 
+  React.useEffect(() => {
+    getMode();
+    const intervalId = setInterval(getMode, 300);
+    return () => clearInterval(intervalId);
+  }, [getMode]);
+
   return (
-    <AerospaceContext.Provider value={{ spaces: aerospaceSpaces }}>
+    <AerospaceContext.Provider value={{ spaces: aerospaceSpaces, mode: currentMode }}>
       {children}
     </AerospaceContext.Provider>
   );

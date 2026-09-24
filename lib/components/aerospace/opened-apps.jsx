@@ -14,19 +14,20 @@ const { React } = Uebersicht;
 export default function OpenedApps({ apps }) {
   if (!apps.length) return null;
 
-  return apps.map((app, i) => {
-    const { focused, "app-name": appName } = app;
-    const Icon = AppIcons.apps[appName] || AppIcons.apps.Default;
+  const visibleApps = apps.slice(0, 2);
 
-    // Generate class names for the app icon
-    const classes = Utils.classNames("space__icon", {
-      "space__icon--focused": focused,
-    });
+  return (
+    <span className="space__apps">
+      {visibleApps.map((app, i) => {
+        const { "app-name": appName } = app;
+        const Icon = AppIcons.apps[appName] || AppIcons.apps.Default;
 
-    return (
-      <SuspenseIcon key={i}>
-        <Icon className={classes} />
-      </SuspenseIcon>
-    );
-  });
+        return (
+          <SuspenseIcon key={i}>
+            <Icon className="space__icon" />
+          </SuspenseIcon>
+        );
+      })}
+    </span>
+  );
 }

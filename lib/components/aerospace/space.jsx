@@ -1,5 +1,6 @@
 import * as Uebersicht from "uebersicht";
 import OpenedApps from "./opened-apps.jsx";
+import { useAerospaceContext } from "../aerospace-context.jsx";
 import { useSimpleBarContext } from "../simple-bar-context.jsx";
 import * as Utils from "../../utils.js";
 import * as Aerospace from "../../aerospace.js";
@@ -15,6 +16,7 @@ const { React } = Uebersicht;
  */
 export default function Space({ space, lastOfSpace }) {
   const { windows } = space;
+  const { mode } = useAerospaceContext();
   const { settings } = useSimpleBarContext();
   const { spacesDisplay } = settings;
   const {
@@ -66,6 +68,7 @@ export default function Space({ space, lastOfSpace }) {
   const classes = Utils.classNames("space", {
     "space--focused": focused,
     "space--empty": windows.length,
+    "space--mode-wm": focused && mode?.mode === "wm",
   });
 
   return (

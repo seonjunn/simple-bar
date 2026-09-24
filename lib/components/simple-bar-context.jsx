@@ -40,12 +40,13 @@ export default function SimpleBarContextProvider({
   const [_displays, setDisplays] = React.useState(displays);
   const [missives, setMissives] = React.useState([]);
 
-  const { windowManager, enableServer, yabaiServerRefresh } = settings.global;
+  const { windowManager, enableServer, yabaiServerRefresh, aerospaceServerRefresh } = settings.global;
   const serverEnabled = enableServer && yabaiServerRefresh;
   const isYabai = windowManager === "yabai";
   const isAeroSpace = windowManager === "aerospace";
+  const isAerospaceServer = isAeroSpace && enableServer && aerospaceServerRefresh;
 
-  const currentDisplays = serverEnabled && isYabai ? _displays : displays;
+  const currentDisplays = (serverEnabled && isYabai) || isAerospaceServer ? _displays : displays;
 
   const displayId = parseInt(window.location.pathname.replace("/", ""), 10);
 
@@ -60,14 +61,34 @@ export default function SimpleBarContextProvider({
   const adjustedDisplayId =
     isAeroSpace && !hasBuiltInRetina ? displayId - 1 : displayId;
 
-  const currentDisplay =
+  // Try to find the current display by custom index first
+  let currentDisplay =
     currentDisplays?.find((d) => {
-      const id = Aerospace.getCustomDisplayIndex(d) ?? d.id;
+      const id = Aerospace.getCustomDisplayIndex(d, currentDisplays) ?? d.id;
       return id === adjustedDisplayId;
-    }) || {};
+    }) || null;
+
+  // Fallback for AeroSpace: Übersicht's display IDs (from NSScreen) don't always
+  // map sequentially to AeroSpace monitor indices. Übersicht display 1 is always
+  // the built-in; any other ID belongs to an external monitor.
+  if (!currentDisplay && isAeroSpace && currentDisplays?.length) {
+    const sorted = [...currentDisplays].sort((a, b) => {
+      const aB = a["monitor-name"] === "Built-in Retina Display" ? 0 : 1;
+      const bB = b["monitor-name"] === "Built-in Retina Display" ? 0 : 1;
+      if (aB !== bB) return aB - bB;
+      return (
+        (a["monitor-appkit-nsscreen-screens-id"] ?? 0) -
+        (b["monitor-appkit-nsscreen-screens-id"] ?? 0)
+      );
+    });
+    currentDisplay = displayId === 1 ? sorted[0] : sorted[1];
+  }
+
+  currentDisplay = currentDisplay || {};
 
   const displayIndex =
-    (currentDisplay.index ?? Aerospace.getCustomDisplayIndex(currentDisplay)) ||
+    (currentDisplay.index ??
+      Aerospace.getCustomDisplayIndex(currentDisplay, currentDisplays)) ||
     1;
 
   const pushMissive = (newMissive) => {
