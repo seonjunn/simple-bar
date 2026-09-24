@@ -51,22 +51,36 @@ export const Widget = React.memo(() => {
   };
 
   /**
-   * Fetches the wifi status and SSID.
+   * Fetches the wifi status.
+   *
+   * This used to also read the SSID out of `system_profiler SPAirPortDataType`.
+   * That call costs about 6.5 seconds of wall time and wakes airportd every
+   * time, and on a machine that has not granted Location Services it answers
+   * `<redacted>` and nothing else -- six and a half seconds spent to learn
+   * nothing. `ifconfig` alone tells us whether the interface is associated, at
+   * roughly 20ms.
+   *
+   * `networksetup -getairportpower` (~70ms) is what separates "powered off"
+   * from "powered on but not associated", so it only runs when the interface is
+   * already known to be down. While connected -- the common case -- this widget
+   * now costs one `ifconfig`.
    */
   const getWifi = React.useCallback(async () => {
     if (!visible) return;
-    const [status, ssid] = await Promise.all([
-      Uebersicht.run(`ifconfig ${networkDevice} | grep status | cut -c 10-`),
-      Uebersicht.run(
-        `system_profiler SPAirPortDataType | awk '/Current Network/ {getline;$1=$1;print $0 | "tr -d ':'";exit}'`,
-      ),
-    ]);
-    setState({
-      status: Utils.cleanupOutput(status),
-      ssid: Utils.cleanupOutput(ssid),
-    });
+    const status = Utils.cleanupOutput(
+      await Utils.cachedRun(`ifconfig ${networkDevice} | grep status | cut -c 10-`, refresh),
+    );
+    let poweredOn = true;
+    if (status !== "active") {
+      const power = await Utils.cachedRun(
+        `networksetup -getairportpower ${networkDevice}`,
+        refresh,
+      );
+      poweredOn = /:\s*on\s*$/i.test(Utils.cleanupOutput(power));
+    }
+    setState({ status, poweredOn });
     setLoading(false);
-  }, [networkDevice, visible]);
+  }, [networkDevice, visible, refresh]);
 
   useServerSocket("wifi", visible, getWifi, resetWidget, setLoading);
   useWidgetRefresh(visible, getWifi, refresh);
@@ -74,9 +88,9 @@ export const Widget = React.memo(() => {
   if (loading) return <DataWidgetLoader.Widget className="wifi" />;
   if (!state) return null;
 
-  const { status, ssid } = state;
+  const { status, poweredOn } = state;
   const isActive = status === "active";
-  const name = renderName(ssid, hideNetworkName);
+  const name = renderName(isActive, poweredOn, hideNetworkName);
 
   if (hideWifiIfDisabled && !isActive) return null;
 
@@ -137,14 +151,20 @@ function openWifiPreferences(e) {
 }
 
 /**
- * Renders the wifi network name.
- * @param {string} name - The network name.
- * @param {boolean} hideNetworkName - Whether to hide the network name.
- * @returns {string} The rendered network name.
+ * Renders the wifi label.
+ *
+ * The SSID is deliberately not shown: macOS redacts it without Location
+ * Services, so the only way to obtain it was the `system_profiler` call this
+ * widget no longer makes. The three states below are what that call actually
+ * conveyed in practice.
+ *
+ * @param {boolean} isActive - Whether the interface is associated.
+ * @param {boolean} poweredOn - Whether the Wi-Fi radio is powered on.
+ * @param {boolean} hideNetworkName - Whether to hide the label.
+ * @returns {string} The rendered label.
  */
-function renderName(name, hideNetworkName) {
-  if (!name || hideNetworkName) return "";
-  if (name === "with an AirPort network.y off.") return "Disabled";
-  if (name === "with an AirPort network.") return "Searching...";
-  return name;
+function renderName(isActive, poweredOn, hideNetworkName) {
+  if (hideNetworkName) return "";
+  if (isActive) return "Connected";
+  return poweredOn ? "Searching..." : "Disabled";
 }
